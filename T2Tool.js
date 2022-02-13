@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         T2Tool(tool for tmall & taobao)
 // @namespace    http://tampermonkey.net/
-// @version      0.2
+// @version      0.3
 // @author       RaMui
 // @match        *://detail.tmall.com/item.htm?*
 // @match        *://item.taobao.com/item.htm?*
@@ -29,24 +29,34 @@ const getValue = (observer) => {
       )
     }
   } else {
-    document.querySelector('.tm-clear.J_TSaleProp.tb-img     ').querySelectorAll('li').forEach((item) => {
-      item.querySelector('a').click();
-      currentData.push(
-        {
-          sku: item.querySelector('span').textContent,
-          price: document.querySelector('.tm-price').textContent,
-          quantity: 1,
-          unitPrice: document.querySelector('.tm-price').textContent
+    const domList = document.querySelector('.tm-clear.J_TSaleProp.tb-img     ').querySelectorAll('li');
+    for (const iterator of domList) {
+      iterator.getElementsByTagName('a')[0].click();
+      const config = { attributes: true, childList: true, subtree: true };
+      const callback = (mutationsList) => {
+        for (const it of mutationsList) {
+          if (it.target.id === 'J_StrPriceModBox') {
+            currentData.push(
+              {
+                sku: iterator.getElementsByTagName('span')[0].textContent,
+                price: document.querySelector('.tm-price').textContent,
+                quantity: 1,
+                unitPrice: document.querySelector('.tm-price').textContent
+              }
+            )
+            break
+          }
         }
-      )
-    })
+      };
+      const observer = new MutationObserver(callback);
+      observer.observe(document.getElementById('J_StrPriceModBox'), config);
+    }
   }
   const div = document.createElement('div');
   div.setAttribute('id', 'ramuiDiv');
   document.getElementById('detail').insertBefore(div, document.getElementById('detail').firstChild);
   document.getElementById('ramuiDiv').appendChild(app.render());
   observer.disconnect();
-  skuTable.options.rows = currentData;
 }
 
 class RaMuiElement {
@@ -157,19 +167,30 @@ class RaMuiElement {
 
 const currentData = [];
 
-const skuDataAfterHandler = [];
+let skuDataAfterHandler = [];
 
-const sukDataHandler = (separate) => {
+const sukDataHandler = (separate, unit) => {
+  skuDataAfterHandler = [];
   currentData.forEach(item => {
     const itemCopy = { sku: item.sku, price: item.price, quantity: item.quantity, unitPrice: item.unitPrice };
-    if (itemCopy.sku.split(separate).length > 1) {
+    for (const iterator of separate) {
+      let open = itemCopy.sku.indexOf(iterator[0]) + 1;
+      const close = itemCopy.sku.indexOf(iterator[1]);
+      if (open < 0 || close < 0) {
+        continue;
+      }
+      let unitStr = itemCopy.sku.substring(open, close);
+      if (!unitStr.includes(unit)) {
+        continue;
+      }
       let hasSeparate = false;
-      hasSeparate = isNaN(itemCopy.sku.split(separate)[1].replace(/[^0-9_]/g, ''))
-      itemCopy.quantity = hasSeparate ? 1 : itemCopy.sku.split(separate)[1].replace(/[^0-9_]/g, '');
+      hasSeparate = isNaN(unitStr.split(unit)[0].replace(/[^0-9_]/g, ''));
+      itemCopy.quantity = hasSeparate ? 1 : unitStr.split(unit)[0].replace(/[^0-9_]/g, '');
       itemCopy.unitPrice = (itemCopy.price / itemCopy.quantity).toFixed(3);
       if (!hasSeparate) {
-        itemCopy.sku = itemCopy.sku.split(separate)[0];
+        itemCopy.sku = itemCopy.sku.substring(0, --open)
       }
+      break;
     }
     skuDataAfterHandler.push(itemCopy);
   })
@@ -291,18 +312,45 @@ const head = new RaMuiElement({
 
 const input = new RaMuiElement({
   tagName: 'input',
-  props: { id: 'separate' },
-  styles: { width: '50px', borderRadius: '4xp', border: '2px solid rgb(76, 175, 80)' },
+  props: { id: 'skuSeparate' },
+  styles: { width: '50px', borderRadius: '4xp', border: '2px solid rgb(76, 175, 80)' }
+})
+
+const unitInput = new RaMuiElement({
+  tagName: 'input',
+  props: { id: 'skuUnit' },
+  styles: { width: '50px', borderRadius: '4xp', border: '2px solid rgb(76, 175, 80)' }
+})
+
+const dataHandlerButton = new RaMuiElement({
+  tagName: 'button',
+  styles: {
+    border: 'none',
+    color: '#4CAF50',
+    padding: '5px 10px',
+    textAlign: 'center',
+    cursor: 'pointer',
+    borderRadius: '4px',
+    fontSize: '4px',
+    margin: '4px',
+    border: '2px solid #4CAF50',
+    height: '27px'
+  },
+  children: ['处理'],
   listener: {
-    keydown: (e) => {
-      if (e.code === 'Enter') {
-        if (e.target.value.trim() !== '') {
-          sukDataHandler(e.target.value);
-        }
-      }
+    mouseover: (e) => {
+      e.target.style.backgroundColor = '#4CAF50';
+      e.target.style.color = 'white';
+    },
+    mouseout: (e) => {
+      e.target.style.backgroundColor = 'white';
+      e.target.style.color = '#4CAF50';
+    },
+    click: () => {
+      sukDataHandler(document.getElementById('skuSeparate').value.split(','), document.getElementById('skuUnit').value);
     }
   }
-})
+});
 
 const settingDiv = new RaMuiElement({
   tagName: 'div',
@@ -312,7 +360,7 @@ const settingDiv = new RaMuiElement({
     height: '30px',
   },
   visible: false,
-  children: ['分割符:', input],
+  children: ['分割组:', input, '单位:', unitInput, dataHandlerButton],
 });
 
 const skuTable = new RaMuiElement({
@@ -428,6 +476,7 @@ const ramui = new RaMuiElement({
     click: (e) => {
       skuDataTableDiv.options.visible = true;
       ramui.options.visible = false;
+      skuTable.options.rows = currentData;
     }
   }
 });
